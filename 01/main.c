@@ -19,10 +19,13 @@ int main() {
     int64_t prev = dial;
 
     part2 += number / 100;
+    if (0 == prev && 0 == number % 100) {
+      part2--;
+    }
     number %= 100;
     dial += (positive) ? (number) : (-1 * number);
 
-    if ((dial < 0 && prev != 0) || dial > 100) {
+    if ((dial < 0 || dial > 100) && 0 != prev) {
       part2++;
     }
     if (0 > dial) {
