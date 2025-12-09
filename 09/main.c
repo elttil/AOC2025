@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,8 +14,19 @@ struct edge {
 #define min(a, b) (((a) < (b)) ? (a) : (b))
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 
-struct edge edges[4096 * 100];
-size_t num_edges = 0;
+#define DYN_ARRAY(type, name)                                                  \
+  type *name = NULL;                                                           \
+  size_t name##_size = 0;                                                      \
+  size_t num_##name = 0;
+
+#define DYN_INC(name)                                                          \
+  if (num_##name >= name##_size) {                                             \
+    name##_size += 4096;                                                       \
+    name = realloc(name, name##_size * sizeof(*name));                         \
+    assert(name);                                                              \
+  }
+
+DYN_ARRAY(struct edge, edges)
 
 struct box {
   struct edge *edges[2];
@@ -25,11 +37,9 @@ struct wall {
   struct edge *edges[2];
 };
 
-struct wall walls[4096 * 100];
-size_t num_walls = 0;
+DYN_ARRAY(struct wall, walls)
 
-struct box boxes[4096 * 100];
-size_t num_boxes = 0;
+DYN_ARRAY(struct box, boxes)
 
 static bool check_wall(struct wall *wall, int x, int y, bool x_axis,
                        bool sign) {
@@ -199,6 +209,7 @@ int main(int argc, char **argv) {
       break;
     }
     scanf("");
+    DYN_INC(edges);
     edges[num_edges].x = x;
     edges[num_edges].y = y;
     num_edges++;
@@ -206,6 +217,7 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < num_edges; i++) {
     for (int j = i + 1; j < num_edges; j++) {
+      DYN_INC(boxes);
       boxes[num_boxes].edges[0] = &edges[i];
       boxes[num_boxes].edges[1] = &edges[j];
       boxes[num_boxes].area = calc_area(&edges[i], &edges[j]);
@@ -215,12 +227,14 @@ int main(int argc, char **argv) {
   qsort(boxes, num_boxes, sizeof(struct box), compar);
   struct box *f = &boxes[num_boxes - 1];
   part1 = calc_area(f->edges[0], f->edges[1]);
+  printf("part1: %" PRIu64 "\n", part1);
 
   for (int i = 0; i < num_edges; i++) {
     for (int j = i + 1; j < num_edges; j++) {
       if (edges[i].x != edges[j].x && edges[i].y != edges[j].y) {
         continue;
       }
+      DYN_INC(walls);
       walls[num_walls].edges[0] = &edges[i];
       walls[num_walls].edges[1] = &edges[j];
       num_walls++;
@@ -235,7 +249,6 @@ int main(int argc, char **argv) {
     }
   }
 
-  printf("part1: %" PRIu64 "\n", part1);
   printf("part2: %" PRIu64 "\n", part2);
   return 0;
 }
