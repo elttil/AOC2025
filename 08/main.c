@@ -18,53 +18,76 @@
 FILE *fp = NULL;
 #endif // VISUAL
 
-struct circuit {
-  struct box *boxes[4096];
-  size_t num_boxes;
+struct element {
+  uint64_t parent;
+  size_t size;
 };
+
+struct dsu {
+  struct element *el;
+  size_t el_size;
+};
+
+bool dsu_init(struct dsu *ctx, size_t size) {
+  ctx->el_size = 0;
+  ctx->el = malloc(size * sizeof(struct element));
+  if (!ctx->el) {
+    return false;
+  }
+  ctx->el_size = size;
+  for (size_t i = 0; i < size; i++) {
+    ctx->el[i].parent = i;
+    ctx->el[i].size = 1;
+  }
+  return true;
+}
+
+uint64_t dsu_find(struct dsu *ctx, uint64_t idx) {
+  uint64_t parent = ctx->el[idx].parent;
+  if (idx == parent) {
+    return idx;
+  }
+  uint64_t ret_parent = dsu_find(ctx, parent);
+  ctx->el[idx].parent = ret_parent;
+  return ret_parent;
+}
+
+uint64_t dsu_union(struct dsu *ctx, uint64_t a, uint64_t b) {
+  uint64_t a_parent = dsu_find(ctx, a);
+  uint64_t b_parent = dsu_find(ctx, b);
+  if (a_parent == b_parent) {
+    return 0;
+  }
+  if (ctx->el[a_parent].size > ctx->el[b_parent].size) {
+    ctx->el[b_parent].parent = a_parent;
+    ctx->el[a_parent].size += ctx->el[b_parent].size;
+    return ctx->el[a_parent].size;
+  } else {
+    ctx->el[a_parent].parent = b_parent;
+    ctx->el[b_parent].size += ctx->el[a_parent].size;
+    return ctx->el[b_parent].size;
+  }
+}
 
 struct box {
   int64_t x;
   int64_t y;
   int64_t z;
-  struct circuit *cir;
 };
 
+size_t num_connections = 0;
+#ifdef VISUAL
 struct connection {
   struct box *a;
   struct box *b;
 };
 
-bool circuit_add(struct circuit *cir, struct box *box) {
-  assert(!box->cir);
-  box->cir = cir;
+struct connection *connections = NULL;
+size_t connections_size = 0;
+#endif // VISUAL
 
-  for (size_t i = 0; i < cir->num_boxes; i++) {
-    if (cir->boxes[i] == box) {
-      return false;
-    }
-  }
-
-  cir->boxes[cir->num_boxes] = box;
-  cir->num_boxes++;
-  return true;
-}
-
-struct circuit *circuits[4096 * 1000];
-size_t num_circuits = 0;
-
-void circuit_morph(struct circuit *a, struct circuit *b) {
-  for (size_t i = 0; i < b->num_boxes; i++) {
-    b->boxes[i]->cir = NULL;
-    circuit_add(a, b->boxes[i]);
-  }
-  b->num_boxes = 0;
-}
-
-struct connection connections[1000 * 1000 * 10];
-size_t num_connections = 0;
-
-struct box boxes[4096 * 1000];
+struct box *boxes = NULL;
+size_t boxes_size = 0;
 size_t num_boxes = 0;
 
 static inline int64_t distance(struct box *a, struct box *b) {
@@ -74,19 +97,30 @@ static inline int64_t distance(struct box *a, struct box *b) {
   return dx * dx + dy * dy + dz * dz;
 }
 
-static void add_connection(struct box *a, struct box *b) {
+static inline void add_connection(struct box *a, struct box *b) {
+#ifdef VISUAL
+  if (num_connections >= connections_size) {
+    connections_size += 4096 * 1000;
+    connections = realloc(connections, connections_size);
+    assert(connections);
+  }
+
   connections[num_connections].a = a;
   connections[num_connections].b = b;
+#endif // VISUAL
   num_connections++;
 }
 
 struct distance {
-  struct box *a;
-  struct box *b;
-  int64_t distance;
+  uint64_t distance;
+  uint32_t i;
+  uint32_t j;
+  //  struct box *a;
+  //  struct box *b;
 };
 
-struct distance dis[1000 * 1000 * 10];
+struct distance *dis = NULL;
+size_t distance_size = 0;
 size_t num_distance = 0;
 
 int compar(const void *_a, const void *_b) {
@@ -108,8 +142,14 @@ void sort(void) {
       if (i == j) {
         continue;
       }
-      dis[num_distance].a = box;
-      dis[num_distance].b = &boxes[j];
+      if (num_distance >= distance_size) {
+        distance_size += 4096 * 1000;
+        dis = realloc(dis, distance_size * sizeof(struct distance));
+        assert(dis);
+      }
+
+      dis[num_distance].i = i;
+      dis[num_distance].j = j;
       dis[num_distance].distance = distance(box, &boxes[j]);
       num_distance++;
     }
@@ -213,6 +253,12 @@ int main() {
       break;
     }
 
+    if (num_boxes >= boxes_size) {
+      boxes_size += 4096;
+      boxes = realloc(boxes, boxes_size * sizeof(struct box));
+      assert(boxes);
+    }
+
     int64_t x;
     int64_t y;
     int64_t z;
@@ -220,8 +266,8 @@ int main() {
     boxes[num_boxes].x = x;
     boxes[num_boxes].y = y;
     boxes[num_boxes].z = z;
-    boxes[num_boxes].cir = NULL;
     num_boxes++;
+    //	printf("Line: %llu %llu %llu\n", x, y, z);
   }
 
 #ifdef VISUAL
@@ -235,11 +281,14 @@ int main() {
 
   uint64_t sum = 1;
 
+  struct dsu ctx;
+  dsu_init(&ctx, num_boxes);
+
   for (size_t j = 0;; j++) {
     if (1000 == num_connections) {
       for (int i = 0; i < 3; i++) {
         uint64_t big = 0;
-        for (int z = 0; z < (int)num_circuits; z++) {
+        for (int z = 0; z < (int)ctx.el_size; z++) {
           bool e = false;
           for (int k = 0; k < 3; k++) {
             if (z == biggest[k]) {
@@ -249,59 +298,35 @@ int main() {
           if (e) {
             continue;
           }
-          struct circuit *cir = circuits[z];
-          if (cir->num_boxes > big) {
-            big = cir->num_boxes;
+          if ((int)ctx.el[z].size > big) {
+            big = ctx.el[z].size;
             biggest[i] = z;
           }
         }
       }
-      sum *= circuits[biggest[0]]->num_boxes;
-      sum *= circuits[biggest[1]]->num_boxes;
-      sum *= circuits[biggest[2]]->num_boxes;
+      sum *= ctx.el[biggest[0]].size;
+      sum *= ctx.el[biggest[1]].size;
+      sum *= ctx.el[biggest[2]].size;
     }
     if (j >= num_distance) {
       break;
     }
-    struct box *a = dis[j].a;
-    struct box *b = dis[j].b;
-
-#ifdef VISUAL
-    render(fp);
-#endif // VISUAL
+    struct box *a = &boxes[dis[j].i];
+    struct box *b = &boxes[dis[j].j];
 
     add_connection(a, b);
+#ifdef VISUAL
+    render(fp);
 
-    if (a->cir && a->cir == b->cir) {
-      continue;
+    if (part2 == 0 && num_boxes == dsu_union(&ctx, dis[j].i, dis[j].j)) {
+      part2 = a->x * b->x;
     }
-
-    part2 = a->x * b->x;
-
-    if (a->cir && !b->cir) {
-      if (circuit_add(a->cir, b)) {
-      }
-      continue;
+#else  // VISUAL
+    if (num_boxes == dsu_union(&ctx, dis[j].i, dis[j].j)) {
+      part2 = a->x * b->x;
+      break;
     }
-
-    if (b->cir) {
-      if (a->cir) {
-        circuit_morph(a->cir, b->cir);
-        continue;
-      }
-      if (circuit_add(b->cir, a)) {
-
-        continue;
-      }
-    }
-
-    struct circuit *cir = malloc(sizeof(struct circuit));
-    cir->num_boxes = 0;
-    circuits[num_circuits] = cir;
-    num_circuits++;
-
-    circuit_add(cir, a);
-    circuit_add(cir, b);
+#endif // VISUAL
   }
   part1 = sum;
 
